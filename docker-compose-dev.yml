@@ -1,0 +1,22 @@
+  
+version: '3'
+services:
+  mongo:
+    image: mongo:3.6
+    network: home
+  web:
+    build: .
+    network: home
+    ports:
+     - "8080:8080"
+    environment:
+     - MONGODB_URI=mongodb://mongo:27017/test 
+     - OPENSHIFT_NODEJS_PORT=8080
+    links:
+     - mongo 
+    depends_on: 
+     - mongo 
+    volumes:
+     - .:/starter
+     - /starter/node_modules
+     

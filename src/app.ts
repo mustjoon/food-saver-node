@@ -9,22 +9,42 @@ import path from "path";
 import mongoose from "mongoose";
 import passport from "passport";
 import bluebird from "bluebird";
-import { MONGODB_URI, SESSION_SECRET } from "./util/secrets";
-
-const MongoStore = mongo(session);
+import cors from "cors";
+import { MONGODB_URI, SESSION_SECRET, CLIENT_URL } from "./util/secrets";
+import {issueJWT} from "./util/issue-jwt";
+import socketIO from "socket.io";
+import httpServer from "http";
 
 // Controllers (route handlers)
 import * as homeController from "./controllers/home";
 import * as userController from "./controllers/user";
 import * as apiController from "./controllers/api";
 import * as contactController from "./controllers/contact";
-
+import * as opportunityController from "./controllers/opportunity";
+import * as chatController from "./controllers/chat";
+import {initSocketIO, getIO} from "./socket";
+//import {initSocket} from "./socket";
 
 // API keys and Passport configuration
 import * as passportConfig from "./config/passport";
 
-// Create Express server
-const app = express();
+
+const MongoStore = mongo(session);
+
+const app: any  = express();
+const http = httpServer.createServer(app);
+
+// Init socket io
+initSocketIO(http);
+
+/*
+*  Socket handlers
+*/
+chatController.setupChatSockets();
+
+app.use(cors({credentials: true, origin: "*"}));
+
+
 
 // Connect to MongoDB
 const mongoUrl = MONGODB_URI;
@@ -38,7 +58,7 @@ mongoose.connect(mongoUrl, { useNewUrlParser: true, useCreateIndex: true, useUni
 });
 
 // Express configuration
-app.set("port", process.env.PORT || 3000);
+//app.set("port", process.env.PORT || 3000);
 app.set("views", path.join(__dirname, "../views"));
 app.set("view engine", "pug");
 app.use(compression());
@@ -81,6 +101,8 @@ app.use(
     express.static(path.join(__dirname, "public"), { maxAge: 31557600000 })
 );
 
+
+
 /**
  * Primary app routes.
  */
@@ -97,7 +119,7 @@ app.post("/signup", userController.postSignup);
 app.get("/contact", contactController.getContact);
 app.post("/contact", contactController.postContact);
 app.get("/account", passportConfig.isAuthenticated, userController.getAccount);
-app.post("/account/profile", passportConfig.isAuthenticated, userController.postUpdateProfile);
+//app.post("/api/profile", passportConfig.isAuthenticated, userController.postUpdateProfile);
 app.post("/account/password", passportConfig.isAuthenticated, userController.postUpdatePassword);
 app.post("/account/delete", passportConfig.isAuthenticated, userController.postDeleteAccount);
 app.get("/account/unlink/:provider", passportConfig.isAuthenticated, userController.getOauthUnlink);
@@ -107,13 +129,43 @@ app.get("/account/unlink/:provider", passportConfig.isAuthenticated, userControl
  */
 app.get("/api", apiController.getApi);
 app.get("/api/facebook", passportConfig.isAuthenticated, passportConfig.isAuthorized, apiController.getFacebook);
+app.get("/api/opportunity", passportConfig.isJWTAuth,opportunityController.getOpportunitys);
+app.post("/api/opportunity",passportConfig.isJWTAuth, opportunityController.createOpportunity);
+app.put("/api/opportunity/:id", opportunityController.editOpportunity);
+app.get("/api/opportunity/:id/chat", passportConfig.isJWTAuth, chatController.getChat);
+
+app.get("/api/auth/", passportConfig.isAuthenticated, userController.getAuth);
+app.get("/api/users/", passportConfig.isAuthenticated, userController.getUsers);
+app.get("/api/user/", passportConfig.isJWTAuth, userController.getUser);
+app.post("/api/profile", passportConfig.isJWTAuth, userController.updateProfile);
+
+app.post("/api/chat",passportConfig.isJWTAuth, chatController.createChat);
+app.get("/api/chat", passportConfig.isJWTAuth, chatController.getChats);
+
+
 
 /**
  * OAuth authentication routes. (Sign in)
  */
-app.get("/auth/facebook", passport.authenticate("facebook", { scope: ["email", "public_profile"] }));
+//app.get("/auth/facebook", passport.authenticate("facebook", { scope: ["email", "public_profile"] }));
 app.get("/auth/facebook/callback", passport.authenticate("facebook", { failureRedirect: "/login" }), (req, res) => {
     res.redirect(req.session.returnTo || "/");
 });
 
-export default app;
+
+
+app.get("/auth/google",
+  passport.authenticate("google", { scope: ["profile"]}));
+
+app.get("/auth/google/callback", 
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  function(req, res) {
+    const token = issueJWT(req.user);
+    const urlPath = ("authed?token="+encodeURIComponent(token.token)+ "&expires="+encodeURIComponent(token.expires));
+    res.redirect(CLIENT_URL + "/"+ urlPath);
+  });
+
+
+  http.listen(8080);
+
+  export default app;

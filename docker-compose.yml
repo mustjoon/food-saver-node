@@ -1,0 +1,29 @@
+  
+version: '3.6'
+services:
+  mongo:
+    image: mongo:3.6
+    networks:
+      - gateway
+  node:
+    build: .
+    command: npm run debug
+    container_name: food-saver-server
+    networks:
+      - gateway
+    ports:
+     - "8080:8080"
+    environment:
+     - MONGODB_URI_LOCAL=mongodb://mongo:27017/test 
+     - PORT=8080
+    links:
+     - mongo 
+    depends_on: 
+     - mongo 
+    volumes:
+     - .:/starter
+     - /starter/node_modules
+networks:
+  gateway: {}
+
+     

@@ -8,6 +8,11 @@ import { IVerifyOptions } from "passport-local";
 import { WriteError } from "mongodb";
 import { check, sanitize, validationResult } from "express-validator";
 import "../config/passport";
+import UserService from "../services/user-service";
+import JwtService from "../services/jwt-service";
+import { issueJWT } from "../util/issue-jwt";
+import userService from "../services/user-service";
+import jwtService from "../services/jwt-service";
 
 /**
  * Login page.
@@ -35,20 +40,20 @@ export const postLogin = async (req: Request, res: Response, next: NextFunction)
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
-        req.flash("errors", errors.array());
-        return res.redirect("/login");
+        res.status(403).json({errors: errors.array()});
     }
 
     passport.authenticate("local", (err: Error, user: UserDocument, info: IVerifyOptions) => {
         if (err) { return next(err); }
         if (!user) {
             req.flash("errors", {msg: info.message});
-            return res.redirect("/login");
+            return res.status(403).json(info.message);
         }
         req.logIn(user, (err) => {
             if (err) { return next(err); }
-            req.flash("success", { msg: "Success! You are logged in." });
-            res.redirect(req.session.returnTo || "/");
+          
+            const token = issueJWT(req.user);
+            res.status(200).json(token);
         });
     })(req, res, next);
 };
@@ -101,16 +106,19 @@ export const postSignup = async (req: Request, res: Response, next: NextFunction
     User.findOne({ email: req.body.email }, (err, existingUser) => {
         if (err) { return next(err); }
         if (existingUser) {
-            req.flash("errors", { msg: "Account with that email address already exists." });
-            return res.redirect("/signup");
+            res.status(500).json({error:"Account with that email address already exists." });
+           // req.flash("errors", { msg: "Account with that email address already exists." });
+            //return res.redirect("/signup");
         }
         user.save((err) => {
             if (err) { return next(err); }
             req.logIn(user, (err) => {
                 if (err) {
-                    return next(err);
+                    res.status(500).json(err);
                 }
-                res.redirect("/");
+                const token = issueJWT(user);
+                res.status(200).json(token);
+                
             });
         });
     });
@@ -121,6 +129,7 @@ export const postSignup = async (req: Request, res: Response, next: NextFunction
  * @route GET /account
  */
 export const getAccount = (req: Request, res: Response) => {
+
     res.render("account/profile", {
         title: "Account Management"
     });
@@ -131,17 +140,21 @@ export const getAccount = (req: Request, res: Response) => {
  * @route POST /account/profile
  */
 export const postUpdateProfile = async (req: Request, res: Response, next: NextFunction) => {
-    await check("email", "Please enter a valid email address.").isEmail().run(req);
+   // await check("email", "Please enter a valid email address.").isEmail().run(req);
     // eslint-disable-next-line @typescript-eslint/camelcase
-    await sanitize("email").normalizeEmail({ gmail_remove_dots: false }).run(req);
+  //  await sanitize("email").normalizeEmail({ gmail_remove_dots: false }).run(req);
+    const user = req.user as any;
 
-    const errors = validationResult(req);
+    const updatedUser = await userService.edit(req.body._id,req.body);
+    res.status(200).json({user: updatedUser});
 
+
+    //const errors = validationResult(req);
+    /*
     if (!errors.isEmpty()) {
-        req.flash("errors", errors.array());
-        return res.redirect("/account");
+        res.status(500).json(errors)
     }
-
+    /*
     const user = req.user as UserDocument;
     User.findById(user.id, (err, user: UserDocument) => {
         if (err) { return next(err); }
@@ -162,6 +175,7 @@ export const postUpdateProfile = async (req: Request, res: Response, next: NextF
             res.redirect("/account");
         });
     });
+    */
 };
 
 /**
@@ -384,5 +398,37 @@ export const postForgot = async (req: Request, res: Response, next: NextFunction
     ], (err) => {
         if (err) { return next(err); }
         res.redirect("/forgot");
+    });
+};
+
+export const getUsers =async(req: Request, res: Response) => {
+    const {count, items} = await UserService.getAll();
+    res.status(200).json({
+        count,
+        items,
+    });
+};
+
+export const getUser =async(req: Request, res: Response) => {
+    const user = await jwtService.getUser(req);
+    res.status(200).json({
+        user
+    });
+};
+
+export const getAuth =async(req: Request, res: Response) => {
+    const user: any = await jwtService.decode(req);
+    user.token = req.headers.authorization;
+    res.status(200).json({
+        user
+    });
+};
+
+export const updateProfile = async (req: Request, res: Response) => {
+    const profile = req.body;
+    const id =  (await jwtService.getUser(req)).id;
+    const updatedUser = await userService.editProfile(id, profile);
+    res.status(200).json({
+        profile: updatedUser.profile
     });
 };

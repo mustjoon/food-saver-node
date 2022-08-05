@@ -1,14 +1,21 @@
 import passport from "passport";
 import passportLocal from "passport-local";
 import passportFacebook from "passport-facebook";
+import passportGoogle from "passport-google-oauth20";
+import passportJwt from "passport-jwt";
 import _ from "lodash";
 
-// import { User, UserType } from '../models/User';
-import { User, UserDocument } from "../models/User";
+import { User, UserDocument, findOrCreate } from "../models/User";
+import {JWT_SECRET} from "../util/secrets";
 import { Request, Response, NextFunction } from "express";
+import JwtService from "../services/jwt-service";
 
 const LocalStrategy = passportLocal.Strategy;
 const FacebookStrategy = passportFacebook.Strategy;
+const GoogleStrategy = passportGoogle.Strategy;
+const JwtStrategy = passportJwt.Strategy;
+const ExtractJwt =  passportJwt.ExtractJwt;
+
 
 passport.serializeUser<any, any>((user, done) => {
     done(undefined, user.id);
@@ -117,14 +124,66 @@ passport.use(new FacebookStrategy({
     }
 }));
 
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CONSUMER_KEY,
+    clientSecret: process.env.GOOGLE_CONSUMER_SECRET,
+    callbackURL: "http://local-google-oauth-url.com:8080/auth/google/callback",
+
+  },
+  function(token: any, tokenSecret: any, profile: any, done: any) {
+    
+      findOrCreate({ google: profile.id, email: profile.email, displayName: profile.displayName }, function (err: Error, user: any) {
+      
+        done(err, user);
+      });
+  }
+));
+
+const opts: any = {};
+opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken();
+opts.secretOrKey = JWT_SECRET;
+
+opts.session = false; 
+passport.use(new JwtStrategy(opts, function(jwtPayload, done) {
+   
+    User.findOne({_id: jwtPayload.sub}, function(err, user) {
+        
+     
+        if (err) {
+            return done(err, false);
+        }
+        if (user) {
+            return done(null, user);
+        } else {
+            return done(null, false);
+        }
+        
+    });
+}));
+
 /**
  * Login Required middleware.
  */
 export const isAuthenticated = (req: Request, res: Response, next: NextFunction) => {
+   
+    const {authorization} = req.headers;
+    
+    const data: any = JwtService.decode(req);
+    const user = {...data, token: authorization};
+   
+    
+    if(user) {
+
+        req.user = user;
+    }
+    
+
+    
     if (req.isAuthenticated()) {
         return next();
     }
-    res.redirect("/login");
+  
+    throw new Error("403");
 };
 
 /**
@@ -140,3 +199,5 @@ export const isAuthorized = (req: Request, res: Response, next: NextFunction) =>
         res.redirect(`/auth/${provider}`);
     }
 };
+
+export const isJWTAuth =  passport.authenticate("jwt", { session: false });
